@@ -35,6 +35,9 @@ jobs:
 
       - name: Commit and push changes
         run: |
+          git config user.name "Francis1998"
+          git config user.email "Francis1998@users.noreply.github.com"
+
           if git diff --quiet -- assets/total-stars-last-6-months.svg assets/github-totals.svg; then
             echo "No graph changes to commit."
             exit 0
