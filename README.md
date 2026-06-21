@@ -4,7 +4,7 @@
 
 <br/>
 
-**Shunqi Liu** · AI Infra @ LinkedIn · San Francisco Bay Area
+**Shunqi Liu** · Senior AI Infra @ LinkedIn · San Francisco Bay Area
 
 [![Profile Views](https://komarev.com/ghpvc/?username=Francis1998&color=58A6FF&style=flat-square&label=profile+views)](https://github.com/Francis1998)
 
