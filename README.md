@@ -41,10 +41,14 @@ Current focus areas:
 <div align="left">
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white)
-![Java](https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=openjdk&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
 ![LangChain](https://img.shields.io/badge/LangChain-1C3C3C?style=flat-square&logo=langchain&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-Agent%20Orchestration-1C3C3C?style=flat-square)
+![LLM Serving](https://img.shields.io/badge/LLM%20Serving-vLLM%20%7C%20OpenAI--Compatible-6F42C1?style=flat-square)
+![AI Agents](https://img.shields.io/badge/AI%20Agents-Observe--Decide--Act-2EA043?style=flat-square)
+![RAG](https://img.shields.io/badge/RAG-Multi--Hop%20%7C%20GraphRAG-1F6FEB?style=flat-square)
+![Model Routing](https://img.shields.io/badge/Model%20Routing-Cost%20%7C%20Latency%20Aware-F0883E?style=flat-square)
+![Vector Search](https://img.shields.io/badge/Vector%20Search-Embedding%20Retrieval-8250DF?style=flat-square)
 ![OpenAI](https://img.shields.io/badge/OpenAI-412991?style=flat-square&logo=openai&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=flat-square&logo=kubernetes&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
