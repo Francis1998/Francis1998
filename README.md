@@ -32,6 +32,7 @@ Current focus areas:
 | [**scholar-rag-agent**](https://github.com/Francis1998/scholar-rag-agent) | Production-grade Agentic RAG for scientific literature — multi-hop reasoning, GraphRAG, multi-LLM routing |
 | [**medagent-core**](https://github.com/Francis1998/medagent-core) | Safety-first clinical AI reasoning agent — explicit state machines, Bayesian hypothesis ranking, mandatory disclaimers |
 | [**multi-bot-agentic**](https://github.com/Francis1998/multi-bot-agentic) | Deterministic multi-provider AI-agent orchestrator with rationale traces, safety controls, and durable event logs |
+| [**agentic-career-search**](https://github.com/Francis1998/agentic-career-search) | Autonomous AI-agent orchestration engine for job discovery with decision traces, tool adapters, and production-grade run control |
 
 ---
 
@@ -56,18 +57,18 @@ Current focus areas:
 
 ---
 
-### Stats
+### Stars
 
 <div align="center">
 
-<img height="160" src="https://github-readme-stats.vercel.app/api?username=Francis1998&show_icons=true&theme=github_dark&hide_border=true&count_private=true&include_all_commits=true" />
-<img height="160" src="https://github-readme-stats.vercel.app/api/top-langs/?username=Francis1998&layout=compact&theme=github_dark&hide_border=true&langs_count=6" />
+![Total Stars](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Fusers%2FFrancis1998&query=%24.public_repos&label=public+repos&color=58A6FF&style=flat-square)
+![GitHub Stars](https://img.shields.io/github/stars/Francis1998?affiliations=OWNER&style=flat-square&label=total+stars&color=f0c040)
 
 </div>
 
 <div align="center">
 
-[![GitHub Streak](https://streak-stats.demolab.com?user=Francis1998&theme=github-dark-blue&hide_border=true&date_format=M%20j%5B%2C%20Y%5D)](https://git.io/streak-stats)
+[![Activity Graph](https://github-readme-activity-graph.vercel.app/graph?username=Francis1998&theme=github-compact&hide_border=true&area=true&color=58A6FF&line=58A6FF&point=ffffff)](https://github.com/ashutosh00710/github-readme-activity-graph)
 
 </div>
 
