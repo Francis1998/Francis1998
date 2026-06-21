@@ -61,7 +61,7 @@ Current focus areas:
 
 <div align="center">
 
-<img src="https://api.star-history.com/svg?repos=Francis1998/nexus-llm-router,Francis1998/scholar-rag-agent,Francis1998/medagent-core,Francis1998/multi-bot-agentic,Francis1998/agentic-career-search&type=Date&theme=dark" alt="Star History" width="100%" />
+<img src="https://raw.githubusercontent.com/Francis1998/Francis1998/main/assets/total-stars-last-6-months.svg" alt="Total stars across all repositories (last 6 months)" width="100%" />
 
 </div>
 
