@@ -61,14 +61,7 @@ Current focus areas:
 
 <div align="center">
 
-![Total Stars](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Fusers%2FFrancis1998&query=%24.public_repos&label=public+repos&color=58A6FF&style=flat-square)
-![GitHub Stars](https://img.shields.io/github/stars/Francis1998?affiliations=OWNER&style=flat-square&label=total+stars&color=f0c040)
-
-</div>
-
-<div align="center">
-
-[![Activity Graph](https://github-readme-activity-graph.vercel.app/graph?username=Francis1998&theme=github-compact&hide_border=true&area=true&color=58A6FF&line=58A6FF&point=ffffff)](https://github.com/ashutosh00710/github-readme-activity-graph)
+<img src="https://api.star-history.com/svg?repos=Francis1998/nexus-llm-router,Francis1998/scholar-rag-agent,Francis1998/medagent-core,Francis1998/multi-bot-agentic,Francis1998/agentic-career-search&type=Date&theme=dark" alt="Star History" width="100%" />
 
 </div>
 
