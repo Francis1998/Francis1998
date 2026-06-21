@@ -1,4 +1,4 @@
-"""Generate a 6-month total-stars graph across all public repositories."""
+"""Generate stars graph and large total metrics for the profile README."""
 
 from __future__ import annotations
 
@@ -12,11 +12,13 @@ from typing import Any
 import matplotlib
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
 import requests
 
 matplotlib.use("Agg")
 
 GITHUB_API_BASE_URL = "https://api.github.com"
+GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 STARGAZERS_ACCEPT_HEADER = "application/vnd.github.star+json"
 
 
@@ -68,6 +70,37 @@ def _request_json(
     raise ValueError(f"Unexpected JSON payload type from {url}")
 
 
+def _request_graphql(
+    session: requests.Session,
+    query: str,
+    token: str | None,
+    variables: dict[str, Any],
+) -> dict[str, Any]:
+    """Send a GitHub GraphQL request and return decoded JSON."""
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "francis1998-profile-stars-graph",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    response = session.post(
+        GITHUB_GRAPHQL_URL,
+        headers=headers,
+        json={"query": query, "variables": variables},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("errors"):
+        raise ValueError(f"GraphQL error: {payload['errors']}")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("Unexpected GraphQL payload")
+    return data
+
+
 def list_public_owner_repositories(username: str, token: str | None) -> list[str]:
     """Return all non-fork public repositories owned by the user."""
     repository_names: list[str] = []
@@ -96,6 +129,74 @@ def list_public_owner_repositories(username: str, token: str | None) -> list[str
             page += 1
 
     return repository_names
+
+
+def get_total_commit_contributions(username: str, token: str | None) -> int:
+    """Return all-time total commit contributions using yearly GraphQL windows."""
+    user_query = """
+    query($login: String!) {
+      user(login: $login) {
+        createdAt
+      }
+    }
+    """
+    contribution_query = """
+    query($login: String!, $from: DateTime!, $to: DateTime!) {
+      user(login: $login) {
+        contributionsCollection(from: $from, to: $to) {
+          totalCommitContributions
+        }
+      }
+    }
+    """
+
+    with requests.Session() as session:
+        user_data = _request_graphql(session, user_query, token, {"login": username})
+        created_at = (
+            user_data.get("user", {}).get("createdAt")
+            if isinstance(user_data.get("user"), dict)
+            else None
+        )
+        if not isinstance(created_at, str):
+            raise ValueError("Failed to fetch user creation date")
+
+        start_date = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00")).date()
+        end_date = dt.datetime.now(dt.timezone.utc).date()
+        total_commits = 0
+
+        window_start = start_date
+        while window_start <= end_date:
+            window_end = min(window_start + dt.timedelta(days=364), end_date)
+            from_timestamp = dt.datetime.combine(
+                window_start,
+                dt.time.min,
+                tzinfo=dt.timezone.utc,
+            ).isoformat()
+            to_timestamp = dt.datetime.combine(
+                window_end,
+                dt.time.max,
+                tzinfo=dt.timezone.utc,
+            ).isoformat()
+            contribution_data = _request_graphql(
+                session,
+                contribution_query,
+                token,
+                {"login": username, "from": from_timestamp, "to": to_timestamp},
+            )
+
+            user_payload = contribution_data.get("user")
+            if not isinstance(user_payload, dict):
+                raise ValueError("Failed to fetch contributions payload")
+            collection_payload = user_payload.get("contributionsCollection")
+            if not isinstance(collection_payload, dict):
+                raise ValueError("Missing contributions collection")
+            commit_count = collection_payload.get("totalCommitContributions")
+            if not isinstance(commit_count, int):
+                raise ValueError("Invalid commit count from GraphQL")
+            total_commits += commit_count
+            window_start = window_end + dt.timedelta(days=1)
+
+    return total_commits
 
 
 def list_star_dates_for_repository(
@@ -197,17 +298,63 @@ def render_graph(dates: list[dt.date], totals: list[int], output_path: Path) -> 
     plt.close(figure)
 
 
+def render_totals_card(
+    total_stars: int,
+    total_commits: int,
+    output_path: Path,
+) -> None:
+    """Render large totals card with commits and stars."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    figure, axis = plt.subplots(figsize=(12, 2.2), dpi=160)
+    figure.patch.set_facecolor("#0D1117")
+    axis.set_facecolor("#0D1117")
+    axis.axis("off")
+    axis.set_xlim(0, 100)
+    axis.set_ylim(0, 100)
+
+    left_card = FancyBboxPatch(
+        (3, 12),
+        45,
+        76,
+        boxstyle="round,pad=0.8,rounding_size=7",
+        linewidth=1.2,
+        edgecolor="#30363D",
+        facecolor="#11161D",
+    )
+    right_card = FancyBboxPatch(
+        (52, 12),
+        45,
+        76,
+        boxstyle="round,pad=0.8,rounding_size=7",
+        linewidth=1.2,
+        edgecolor="#30363D",
+        facecolor="#11161D",
+    )
+    axis.add_patch(left_card)
+    axis.add_patch(right_card)
+
+    axis.text(25.5, 66, "TOTAL COMMITS", ha="center", va="center", color="#8B949E", fontsize=11, weight="bold")
+    axis.text(25.5, 40, f"{total_commits:,}", ha="center", va="center", color="#58A6FF", fontsize=28, weight="bold")
+    axis.text(74.5, 66, "TOTAL STARS", ha="center", va="center", color="#8B949E", fontsize=11, weight="bold")
+    axis.text(74.5, 40, f"{total_stars:,}", ha="center", va="center", color="#F2CC60", fontsize=28, weight="bold")
+
+    figure.tight_layout(pad=0.2)
+    figure.savefig(output_path, format="svg")
+    plt.close(figure)
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Generate total-stars graph SVG.")
     parser.add_argument("--user", required=True, help="GitHub username")
     parser.add_argument("--months", type=int, default=6, help="Window size in months")
     parser.add_argument("--output", required=True, help="Output SVG path")
+    parser.add_argument("--metrics-output", required=True, help="Output SVG path for metrics card")
     return parser.parse_args()
 
 
 def main() -> None:
-    """Generate and save the stars graph."""
+    """Generate and save the stars graph and totals card."""
     arguments = parse_arguments()
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     end_date = dt.datetime.now(dt.timezone.utc).date()
@@ -220,6 +367,9 @@ def main() -> None:
 
     dates, totals = build_total_stars_series(all_star_dates, start_date, end_date)
     render_graph(dates, totals, Path(arguments.output))
+    total_stars = len(all_star_dates)
+    total_commits = get_total_commit_contributions(arguments.user, token)
+    render_totals_card(total_stars, total_commits, Path(arguments.metrics_output))
 
 
 if __name__ == "__main__":

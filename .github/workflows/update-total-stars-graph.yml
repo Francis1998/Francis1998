@@ -30,15 +30,16 @@ jobs:
           python scripts/generate_total_stars_graph.py \
             --user Francis1998 \
             --months 6 \
-            --output assets/total-stars-last-6-months.svg
+            --output assets/total-stars-last-6-months.svg \
+            --metrics-output assets/github-totals.svg
 
       - name: Commit and push changes
         run: |
-          if git diff --quiet -- assets/total-stars-last-6-months.svg; then
+          if git diff --quiet -- assets/total-stars-last-6-months.svg assets/github-totals.svg; then
             echo "No graph changes to commit."
             exit 0
           fi
 
-          git add assets/total-stars-last-6-months.svg
+          git add assets/total-stars-last-6-months.svg assets/github-totals.svg
           git commit -m "Update total stars graph"
           git push

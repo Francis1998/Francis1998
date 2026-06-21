@@ -61,6 +61,16 @@ Current focus areas:
 
 ---
 
+### Totals
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/Francis1998/Francis1998/main/assets/github-totals.svg" alt="Total commits and total stars" width="100%" />
+
+</div>
+
+---
+
 ### Stars
 
 <div align="center">
