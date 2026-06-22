@@ -200,13 +200,13 @@ def get_total_commit_contributions(username: str, token: str | None) -> int:
     return total_commits
 
 
-def list_star_dates_for_repository(
+def list_star_datetimes_for_repository(
     username: str,
     repository_name: str,
     token: str | None,
-) -> list[dt.date]:
-    """Return all stargazer dates for a repository."""
-    star_dates: list[dt.date] = []
+) -> list[dt.datetime]:
+    """Return all stargazer timestamps (UTC) for a repository."""
+    star_datetimes: list[dt.datetime] = []
     page = 1
     with requests.Session() as session:
         while True:
@@ -224,53 +224,65 @@ def list_star_dates_for_repository(
             for stargazer in stargazers:
                 starred_at = stargazer.get("starred_at")
                 if isinstance(starred_at, str):
-                    star_dates.append(dt.datetime.fromisoformat(starred_at.replace("Z", "+00:00")).date())
+                    star_datetimes.append(dt.datetime.fromisoformat(starred_at.replace("Z", "+00:00")))
 
             if len(stargazers) < 100:
                 break
             page += 1
 
-    return star_dates
+    return star_datetimes
 
 
-def build_weekly_star_series(
-    all_star_dates: list[dt.date],
-    end_date: dt.date,
+def build_halfday_total_star_series(
+    all_star_datetimes: list[dt.datetime],
+    end_datetime: dt.datetime,
     weeks: int,
-) -> tuple[list[dt.date], list[int]]:
-    """Build weekly cumulative total-star snapshots for the last N weeks."""
+) -> tuple[list[dt.datetime], list[int]]:
+    """Build 12-hour cumulative total-star snapshots for the last N weeks."""
     if weeks <= 0:
         raise ValueError("weeks must be positive")
 
-    current_week_start = end_date - dt.timedelta(days=end_date.weekday())
-    week_starts = [
-        current_week_start - dt.timedelta(weeks=offset)
-        for offset in range(weeks - 1, -1, -1)
-    ]
-    earliest_week_start = week_starts[0]
+    bucket_size = dt.timedelta(hours=12)
+    epoch = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
 
-    weekly_new_stars = Counter(
-        star_date - dt.timedelta(days=star_date.weekday())
-        for star_date in all_star_dates
-        if earliest_week_start <= star_date <= end_date
+    def floor_to_bucket(timestamp: dt.datetime) -> dt.datetime:
+        """Floor timestamp to the nearest 12-hour bucket start."""
+        elapsed_seconds = (timestamp - epoch).total_seconds()
+        floored_seconds = int(elapsed_seconds // bucket_size.total_seconds()) * int(bucket_size.total_seconds())
+        return epoch + dt.timedelta(seconds=floored_seconds)
+
+    window_start = end_datetime - dt.timedelta(weeks=weeks)
+    first_bucket_start = floor_to_bucket(window_start)
+    last_bucket_start = floor_to_bucket(end_datetime)
+
+    bucket_starts: list[dt.datetime] = []
+    current_bucket = first_bucket_start
+    while current_bucket <= last_bucket_start:
+        bucket_starts.append(current_bucket)
+        current_bucket += bucket_size
+
+    bucket_new_stars = Counter(
+        floor_to_bucket(star_datetime)
+        for star_datetime in all_star_datetimes
+        if first_bucket_start <= star_datetime <= end_datetime
     )
-    baseline_total = sum(1 for star_date in all_star_dates if star_date < earliest_week_start)
+    baseline_total = sum(1 for star_datetime in all_star_datetimes if star_datetime < first_bucket_start)
 
-    weekly_totals: list[int] = []
+    cumulative_totals: list[int] = []
     running_total = baseline_total
-    for week_start in week_starts:
-        running_total += weekly_new_stars.get(week_start, 0)
-        weekly_totals.append(running_total)
+    for bucket_start in bucket_starts:
+        running_total += bucket_new_stars.get(bucket_start, 0)
+        cumulative_totals.append(running_total)
 
-    return week_starts, weekly_totals
+    return bucket_starts, cumulative_totals
 
 
 def render_weekly_star_graph(
-    week_starts: list[dt.date],
-    weekly_totals: list[int],
+    bucket_starts: list[dt.datetime],
+    cumulative_totals: list[int],
     output_path: Path,
 ) -> None:
-    """Render weekly total stars graph for all repositories."""
+    """Render total stars graph using 12-hour resolution."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     plt.style.use("dark_background")
@@ -279,18 +291,16 @@ def render_weekly_star_graph(
     axis.set_facecolor("#0D1117")
 
     axis.plot(
-        week_starts,
-        weekly_totals,
+        bucket_starts,
+        cumulative_totals,
         color="#58A6FF",
         linewidth=2.3,
-        marker="o",
-        markersize=5,
     )
-    y_floor = min(weekly_totals) if weekly_totals else 0
-    axis.fill_between(week_starts, weekly_totals, y_floor, color="#58A6FF", alpha=0.20)
+    y_floor = min(cumulative_totals) if cumulative_totals else 0
+    axis.fill_between(bucket_starts, cumulative_totals, y_floor, color="#58A6FF", alpha=0.20)
 
     axis.set_title(
-        "Weekly Total Stars Across All Repositories (Last 9 Weeks)",
+        "Total Stars Across All Repositories (Last 9 Weeks, 12h Granularity)",
         color="#C9D1D9",
         fontsize=12,
         pad=10,
@@ -305,14 +315,14 @@ def render_weekly_star_graph(
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     figure.autofmt_xdate()
     axis.yaxis.set_major_locator(MaxNLocator(integer=True))
-    y_min = min(weekly_totals) if weekly_totals else 0
-    y_max = max(weekly_totals) if weekly_totals else 0
+    y_min = min(cumulative_totals) if cumulative_totals else 0
+    y_max = max(cumulative_totals) if cumulative_totals else 0
     axis.set_ylim(max(0, y_min - 1), max(1, y_max) + 1)
 
     for spine in axis.spines.values():
         spine.set_color("#30363D")
 
-    current_total = weekly_totals[-1] if weekly_totals else 0
+    current_total = cumulative_totals[-1] if cumulative_totals else 0
     axis.text(
         0.99,
         0.93,
@@ -393,14 +403,14 @@ def main() -> None:
     """Generate and save the stars graph and totals card."""
     arguments = parse_arguments()
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
-    end_date = dt.datetime.now(dt.timezone.utc).date()
+    end_datetime = dt.datetime.now(dt.timezone.utc)
 
     repository_names = list_public_owner_repositories(arguments.user, token)
-    all_star_dates: list[dt.date] = []
+    all_star_datetimes: list[dt.datetime] = []
     for repository_name in repository_names:
-        all_star_dates.extend(list_star_dates_for_repository(arguments.user, repository_name, token))
+        all_star_datetimes.extend(list_star_datetimes_for_repository(arguments.user, repository_name, token))
 
-    total_stars = len(all_star_dates)
+    total_stars = len(all_star_datetimes)
     total_commits = get_total_commit_contributions(arguments.user, token)
     render_totals_card(total_stars, total_commits, Path(arguments.metrics_output))
 
@@ -410,14 +420,14 @@ def main() -> None:
     if not arguments.weekly_output:
         raise ValueError("--weekly-output is required unless --metrics-only is set")
 
-    week_starts, weekly_totals = build_weekly_star_series(
-        all_star_dates=all_star_dates,
-        end_date=end_date,
+    bucket_starts, cumulative_totals = build_halfday_total_star_series(
+        all_star_datetimes=all_star_datetimes,
+        end_datetime=end_datetime,
         weeks=arguments.weeks,
     )
     render_weekly_star_graph(
-        week_starts=week_starts,
-        weekly_totals=weekly_totals,
+        bucket_starts=bucket_starts,
+        cumulative_totals=cumulative_totals,
         output_path=Path(arguments.weekly_output),
     )
 
