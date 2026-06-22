@@ -13,6 +13,7 @@ import matplotlib
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
+from matplotlib.ticker import MaxNLocator
 import requests
 
 matplotlib.use("Agg")
@@ -232,31 +233,37 @@ def list_star_dates_for_repository(
     return star_dates
 
 
-def build_total_stars_series(
+def build_weekly_star_series(
     all_star_dates: list[dt.date],
-    start_date: dt.date,
     end_date: dt.date,
+    weeks: int,
 ) -> tuple[list[dt.date], list[int]]:
-    """Build cumulative daily totals from start_date to end_date."""
-    stars_per_day = Counter(all_star_dates)
-    baseline_total = sum(1 for star_date in all_star_dates if star_date < start_date)
+    """Build weekly new-star counts for the last N weeks."""
+    if weeks <= 0:
+        raise ValueError("weeks must be positive")
 
-    daily_dates: list[dt.date] = []
-    cumulative_totals: list[int] = []
+    current_week_start = end_date - dt.timedelta(days=end_date.weekday())
+    week_starts = [
+        current_week_start - dt.timedelta(weeks=offset)
+        for offset in range(weeks - 1, -1, -1)
+    ]
+    earliest_week_start = week_starts[0]
 
-    running_total = baseline_total
-    current_date = start_date
-    while current_date <= end_date:
-        running_total += stars_per_day.get(current_date, 0)
-        daily_dates.append(current_date)
-        cumulative_totals.append(running_total)
-        current_date += dt.timedelta(days=1)
-
-    return daily_dates, cumulative_totals
+    weekly_stars = Counter(
+        star_date - dt.timedelta(days=star_date.weekday())
+        for star_date in all_star_dates
+        if earliest_week_start <= star_date <= end_date
+    )
+    weekly_counts = [weekly_stars.get(week_start, 0) for week_start in week_starts]
+    return week_starts, weekly_counts
 
 
-def render_graph(dates: list[dt.date], totals: list[int], output_path: Path) -> None:
-    """Render the total-stars SVG graph."""
+def render_weekly_star_graph(
+    week_starts: list[dt.date],
+    weekly_counts: list[int],
+    output_path: Path,
+) -> None:
+    """Render weekly new stars graph for all repositories."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     plt.style.use("dark_background")
@@ -264,28 +271,43 @@ def render_graph(dates: list[dt.date], totals: list[int], output_path: Path) -> 
     figure.patch.set_facecolor("#0D1117")
     axis.set_facecolor("#0D1117")
 
-    axis.plot(dates, totals, color="#58A6FF", linewidth=2.3)
-    axis.fill_between(dates, totals, [min(totals)] * len(totals), color="#58A6FF", alpha=0.20)
+    axis.plot(
+        week_starts,
+        weekly_counts,
+        color="#58A6FF",
+        linewidth=2.3,
+        marker="o",
+        markersize=5,
+    )
+    axis.fill_between(week_starts, weekly_counts, 0, color="#58A6FF", alpha=0.20)
 
-    axis.set_title("Total Stars Across All Repositories (Last 6 Months)", color="#C9D1D9", fontsize=12, pad=10)
+    axis.set_title(
+        "Weekly New Stars Across All Repositories (Last 9 Weeks)",
+        color="#C9D1D9",
+        fontsize=12,
+        pad=10,
+    )
     axis.set_xlabel("Date", color="#8B949E")
-    axis.set_ylabel("Total Stars", color="#8B949E")
+    axis.set_ylabel("Stars / Week", color="#8B949E")
     axis.tick_params(axis="x", colors="#8B949E")
     axis.tick_params(axis="y", colors="#8B949E")
-    axis.grid(True, linestyle="--", alpha=0.25, color="#30363D")
+    axis.grid(True, axis="y", linestyle="--", alpha=0.25, color="#30363D")
 
-    axis.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-    axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    axis.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MO, interval=1))
+    axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     figure.autofmt_xdate()
+    axis.yaxis.set_major_locator(MaxNLocator(integer=True))
+    y_max = max(weekly_counts) if weekly_counts else 0
+    axis.set_ylim(0, max(1, y_max) + 1)
 
     for spine in axis.spines.values():
         spine.set_color("#30363D")
 
-    final_total = totals[-1] if totals else 0
+    rolling_total = sum(weekly_counts)
     axis.text(
         0.99,
         0.93,
-        f"Current total: {final_total}",
+        f"9-week total new stars: {rolling_total}",
         transform=axis.transAxes,
         ha="right",
         va="center",
@@ -347,8 +369,8 @@ def parse_arguments() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Generate total-stars graph SVG.")
     parser.add_argument("--user", required=True, help="GitHub username")
-    parser.add_argument("--months", type=int, default=6, help="Window size in months")
-    parser.add_argument("--output", help="Output SVG path for stars graph")
+    parser.add_argument("--weeks", type=int, default=9, help="Window size in weeks")
+    parser.add_argument("--weekly-output", help="Output SVG path for weekly stars graph")
     parser.add_argument("--metrics-output", required=True, help="Output SVG path for metrics card")
     parser.add_argument(
         "--metrics-only",
@@ -363,7 +385,6 @@ def main() -> None:
     arguments = parse_arguments()
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     end_date = dt.datetime.now(dt.timezone.utc).date()
-    start_date = subtract_months(end_date, arguments.months)
 
     repository_names = list_public_owner_repositories(arguments.user, token)
     all_star_dates: list[dt.date] = []
@@ -377,11 +398,19 @@ def main() -> None:
     if arguments.metrics_only:
         return
 
-    if not arguments.output:
-        raise ValueError("--output is required unless --metrics-only is set")
+    if not arguments.weekly_output:
+        raise ValueError("--weekly-output is required unless --metrics-only is set")
 
-    dates, totals = build_total_stars_series(all_star_dates, start_date, end_date)
-    render_graph(dates, totals, Path(arguments.output))
+    week_starts, weekly_counts = build_weekly_star_series(
+        all_star_dates=all_star_dates,
+        end_date=end_date,
+        weeks=arguments.weeks,
+    )
+    render_weekly_star_graph(
+        week_starts=week_starts,
+        weekly_counts=weekly_counts,
+        output_path=Path(arguments.weekly_output),
+    )
 
 
 if __name__ == "__main__":
