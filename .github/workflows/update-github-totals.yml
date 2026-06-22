@@ -1,4 +1,4 @@
-name: Update Total Stars Graph
+name: Update GitHub Totals
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  update-stars-graph:
+  update-github-totals:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,14 +24,13 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip matplotlib requests
 
-      - name: Generate graph
+      - name: Generate totals card
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python scripts/generate_total_stars_graph.py \
             --user Francis1998 \
-            --months 6 \
-            --output assets/total-stars-last-6-months.svg \
+            --metrics-only \
             --metrics-output assets/github-totals.svg
 
       - name: Commit and push changes
@@ -39,11 +38,11 @@ jobs:
           git config user.name "Francis1998"
           git config user.email "Francis1998@users.noreply.github.com"
 
-          if git diff --quiet -- assets/total-stars-last-6-months.svg assets/github-totals.svg; then
-            echo "No graph changes to commit."
+          if git diff --quiet -- assets/github-totals.svg; then
+            echo "No totals changes to commit."
             exit 0
           fi
 
-          git add assets/total-stars-last-6-months.svg assets/github-totals.svg
-          git commit -m "Update total stars graph"
+          git add assets/github-totals.svg
+          git commit -m "Update GitHub totals card"
           git push

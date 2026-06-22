@@ -348,8 +348,13 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate total-stars graph SVG.")
     parser.add_argument("--user", required=True, help="GitHub username")
     parser.add_argument("--months", type=int, default=6, help="Window size in months")
-    parser.add_argument("--output", required=True, help="Output SVG path")
+    parser.add_argument("--output", help="Output SVG path for stars graph")
     parser.add_argument("--metrics-output", required=True, help="Output SVG path for metrics card")
+    parser.add_argument(
+        "--metrics-only",
+        action="store_true",
+        help="Skip stars graph generation and only render totals card",
+    )
     return parser.parse_args()
 
 
@@ -365,11 +370,18 @@ def main() -> None:
     for repository_name in repository_names:
         all_star_dates.extend(list_star_dates_for_repository(arguments.user, repository_name, token))
 
-    dates, totals = build_total_stars_series(all_star_dates, start_date, end_date)
-    render_graph(dates, totals, Path(arguments.output))
     total_stars = len(all_star_dates)
     total_commits = get_total_commit_contributions(arguments.user, token)
     render_totals_card(total_stars, total_commits, Path(arguments.metrics_output))
+
+    if arguments.metrics_only:
+        return
+
+    if not arguments.output:
+        raise ValueError("--output is required unless --metrics-only is set")
+
+    dates, totals = build_total_stars_series(all_star_dates, start_date, end_date)
+    render_graph(dates, totals, Path(arguments.output))
 
 
 if __name__ == "__main__":
