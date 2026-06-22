@@ -238,7 +238,7 @@ def build_weekly_star_series(
     end_date: dt.date,
     weeks: int,
 ) -> tuple[list[dt.date], list[int]]:
-    """Build weekly new-star counts for the last N weeks."""
+    """Build weekly cumulative total-star snapshots for the last N weeks."""
     if weeks <= 0:
         raise ValueError("weeks must be positive")
 
@@ -249,21 +249,28 @@ def build_weekly_star_series(
     ]
     earliest_week_start = week_starts[0]
 
-    weekly_stars = Counter(
+    weekly_new_stars = Counter(
         star_date - dt.timedelta(days=star_date.weekday())
         for star_date in all_star_dates
         if earliest_week_start <= star_date <= end_date
     )
-    weekly_counts = [weekly_stars.get(week_start, 0) for week_start in week_starts]
-    return week_starts, weekly_counts
+    baseline_total = sum(1 for star_date in all_star_dates if star_date < earliest_week_start)
+
+    weekly_totals: list[int] = []
+    running_total = baseline_total
+    for week_start in week_starts:
+        running_total += weekly_new_stars.get(week_start, 0)
+        weekly_totals.append(running_total)
+
+    return week_starts, weekly_totals
 
 
 def render_weekly_star_graph(
     week_starts: list[dt.date],
-    weekly_counts: list[int],
+    weekly_totals: list[int],
     output_path: Path,
 ) -> None:
-    """Render weekly new stars graph for all repositories."""
+    """Render weekly total stars graph for all repositories."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     plt.style.use("dark_background")
@@ -273,22 +280,23 @@ def render_weekly_star_graph(
 
     axis.plot(
         week_starts,
-        weekly_counts,
+        weekly_totals,
         color="#58A6FF",
         linewidth=2.3,
         marker="o",
         markersize=5,
     )
-    axis.fill_between(week_starts, weekly_counts, 0, color="#58A6FF", alpha=0.20)
+    y_floor = min(weekly_totals) if weekly_totals else 0
+    axis.fill_between(week_starts, weekly_totals, y_floor, color="#58A6FF", alpha=0.20)
 
     axis.set_title(
-        "Weekly New Stars Across All Repositories (Last 9 Weeks)",
+        "Weekly Total Stars Across All Repositories (Last 9 Weeks)",
         color="#C9D1D9",
         fontsize=12,
         pad=10,
     )
     axis.set_xlabel("Date", color="#8B949E")
-    axis.set_ylabel("Stars / Week", color="#8B949E")
+    axis.set_ylabel("Total Stars", color="#8B949E")
     axis.tick_params(axis="x", colors="#8B949E")
     axis.tick_params(axis="y", colors="#8B949E")
     axis.grid(True, axis="y", linestyle="--", alpha=0.25, color="#30363D")
@@ -297,17 +305,18 @@ def render_weekly_star_graph(
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     figure.autofmt_xdate()
     axis.yaxis.set_major_locator(MaxNLocator(integer=True))
-    y_max = max(weekly_counts) if weekly_counts else 0
-    axis.set_ylim(0, max(1, y_max) + 1)
+    y_min = min(weekly_totals) if weekly_totals else 0
+    y_max = max(weekly_totals) if weekly_totals else 0
+    axis.set_ylim(max(0, y_min - 1), max(1, y_max) + 1)
 
     for spine in axis.spines.values():
         spine.set_color("#30363D")
 
-    rolling_total = sum(weekly_counts)
+    current_total = weekly_totals[-1] if weekly_totals else 0
     axis.text(
         0.99,
         0.93,
-        f"9-week total new stars: {rolling_total}",
+        f"Current total stars: {current_total}",
         transform=axis.transAxes,
         ha="right",
         va="center",
@@ -401,14 +410,14 @@ def main() -> None:
     if not arguments.weekly_output:
         raise ValueError("--weekly-output is required unless --metrics-only is set")
 
-    week_starts, weekly_counts = build_weekly_star_series(
+    week_starts, weekly_totals = build_weekly_star_series(
         all_star_dates=all_star_dates,
         end_date=end_date,
         weeks=arguments.weeks,
     )
     render_weekly_star_graph(
         week_starts=week_starts,
-        weekly_counts=weekly_counts,
+        weekly_totals=weekly_totals,
         output_path=Path(arguments.weekly_output),
     )
 
