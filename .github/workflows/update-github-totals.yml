@@ -2,7 +2,7 @@ name: Update GitHub Totals
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "0 */3 * * *"
       timezone: America/Los_Angeles
   workflow_dispatch:
 
