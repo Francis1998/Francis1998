@@ -20,7 +20,6 @@ matplotlib.use("Agg")
 
 GITHUB_API_BASE_URL = "https://api.github.com"
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
-STARGAZERS_ACCEPT_HEADER = "application/vnd.github.star+json"
 
 
 def subtract_months(reference_date: dt.date, months: int) -> dt.date:
@@ -205,30 +204,69 @@ def list_star_datetimes_for_repository(
     repository_name: str,
     token: str | None,
 ) -> list[dt.datetime]:
-    """Return all stargazer timestamps (UTC) for a repository."""
+    """Return all stargazer timestamps (UTC) for a repository via GraphQL.
+
+    Uses GraphQL because the REST `/stargazers` endpoint returns 403 for
+    GitHub Actions installation tokens (`GITHUB_TOKEN`) on other repositories.
+    """
+    stargazers_query = """
+    query($owner: String!, $name: String!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        stargazers(first: 100, after: $cursor, orderBy: {field: STARRED_AT, direction: ASC}) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          edges {
+            starredAt
+          }
+        }
+      }
+    }
+    """
     star_datetimes: list[dt.datetime] = []
-    page = 1
+    cursor: str | None = None
     with requests.Session() as session:
         while True:
-            endpoint = f"{GITHUB_API_BASE_URL}/repos/{username}/{repository_name}/stargazers"
-            stargazers = _request_json(
-                session=session,
-                url=endpoint,
-                token=token,
-                params={"per_page": 100, "page": page},
-                accept_header=STARGAZERS_ACCEPT_HEADER,
+            data = _request_graphql(
+                session,
+                stargazers_query,
+                token,
+                {"owner": username, "name": repository_name, "cursor": cursor},
             )
-            if not stargazers:
-                break
+            repository_payload = data.get("repository")
+            if not isinstance(repository_payload, dict):
+                raise ValueError(
+                    f"Repository not found or inaccessible: {username}/{repository_name}"
+                )
+            stargazers_payload = repository_payload.get("stargazers")
+            if not isinstance(stargazers_payload, dict):
+                raise ValueError(
+                    f"Missing stargazers payload for {username}/{repository_name}"
+                )
+            edges = stargazers_payload.get("edges")
+            if not isinstance(edges, list):
+                raise ValueError(
+                    f"Invalid stargazer edges for {username}/{repository_name}"
+                )
 
-            for stargazer in stargazers:
-                starred_at = stargazer.get("starred_at")
+            for edge in edges:
+                if not isinstance(edge, dict):
+                    continue
+                starred_at = edge.get("starredAt")
                 if isinstance(starred_at, str):
-                    star_datetimes.append(dt.datetime.fromisoformat(starred_at.replace("Z", "+00:00")))
+                    star_datetimes.append(
+                        dt.datetime.fromisoformat(starred_at.replace("Z", "+00:00"))
+                    )
 
-            if len(stargazers) < 100:
+            page_info = stargazers_payload.get("pageInfo")
+            if not isinstance(page_info, dict):
                 break
-            page += 1
+            has_next_page = page_info.get("hasNextPage") is True
+            end_cursor = page_info.get("endCursor")
+            if not has_next_page or not isinstance(end_cursor, str) or not end_cursor:
+                break
+            cursor = end_cursor
 
     return star_datetimes
 
