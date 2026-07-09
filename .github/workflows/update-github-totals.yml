@@ -5,6 +5,12 @@ on:
     - cron: "0 */3 * * *"
       timezone: America/Los_Angeles
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/generate_total_stars_graph.py"
+      - ".github/workflows/update-github-totals.yml"
 
 permissions:
   contents: write
