@@ -36,8 +36,9 @@ jobs:
         run: |
           python scripts/generate_total_stars_graph.py \
             --user Francis1998 \
-            --weeks 9 \
-            --weekly-output assets/weekly-stars-last-9-weeks.svg \
+            --weeks 1 \
+            --weekly-output assets/weekly-stars-last-1-week.svg \
+            --history-output assets/stars-run-history.json \
             --metrics-output assets/github-totals.svg
 
       - name: Commit and push changes
@@ -45,11 +46,15 @@ jobs:
           git config user.name "Francis1998"
           git config user.email "Francis1998@users.noreply.github.com"
 
-          if git diff --quiet -- assets/github-totals.svg assets/weekly-stars-last-9-weeks.svg; then
+          if git diff --quiet -- assets/github-totals.svg assets/weekly-stars-last-1-week.svg assets/stars-run-history.json; then
             echo "No chart changes to commit."
             exit 0
           fi
 
-          git add assets/github-totals.svg assets/weekly-stars-last-9-weeks.svg
+          git add assets/github-totals.svg assets/weekly-stars-last-1-week.svg assets/stars-run-history.json
+          # Drop the old 9-week chart once the 1-week asset exists.
+          if [ -f assets/weekly-stars-last-9-weeks.svg ]; then
+            git rm -f assets/weekly-stars-last-9-weeks.svg
+          fi
           git commit -m "Update GitHub totals and weekly stars chart"
           git push

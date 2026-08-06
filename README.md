@@ -75,7 +75,7 @@ Current focus areas:
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Francis1998/Francis1998/main/assets/weekly-stars-last-9-weeks.svg" alt="Total stars across all repositories (last 9 weeks, 12-hour granularity)" width="100%" />
+<img src="https://raw.githubusercontent.com/Francis1998/Francis1998/main/assets/weekly-stars-last-1-week.svg" alt="Total stars across all repositories (last 1 week, per action run)" width="100%" />
 
 </div>
 

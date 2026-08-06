@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -20,30 +20,7 @@ matplotlib.use("Agg")
 
 GITHUB_API_BASE_URL = "https://api.github.com"
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
-
-
-def subtract_months(reference_date: dt.date, months: int) -> dt.date:
-    """Return the date that is `months` calendar months before `reference_date`."""
-    if months < 0:
-        raise ValueError("months must be non-negative")
-
-    year = reference_date.year
-    month = reference_date.month - months
-    while month <= 0:
-        month += 12
-        year -= 1
-
-    # Clamp the day to the last valid day in the target month.
-    if month in {1, 3, 5, 7, 8, 10, 12}:
-        last_day = 31
-    elif month in {4, 6, 9, 11}:
-        last_day = 30
-    else:
-        is_leap_year = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
-        last_day = 29 if is_leap_year else 28
-
-    day = min(reference_date.day, last_day)
-    return dt.date(year, month, day)
+HISTORY_SCHEMA_VERSION = 1
 
 
 def _request_json(
@@ -101,9 +78,13 @@ def _request_graphql(
     return data
 
 
-def list_public_owner_repositories(username: str, token: str | None) -> list[str]:
-    """Return all non-fork public repositories owned by the user."""
-    repository_names: list[str] = []
+def get_total_public_owner_stars(username: str, token: str | None) -> int:
+    """Return the sum of stargazer counts across non-fork public owner repositories.
+
+    Uses repository metadata (`stargazers_count`) instead of listing stargazers.
+    Listing stargazers is forbidden for GitHub Actions installation tokens.
+    """
+    total_stars = 0
     page = 1
     with requests.Session() as session:
         while True:
@@ -120,15 +101,17 @@ def list_public_owner_repositories(username: str, token: str | None) -> list[str
             for repository in repositories:
                 if repository.get("fork"):
                     continue
-                repository_name = repository.get("name")
-                if isinstance(repository_name, str) and repository_name:
-                    repository_names.append(repository_name)
+                star_count = repository.get("stargazers_count")
+                if isinstance(star_count, int):
+                    total_stars += star_count
+                elif isinstance(star_count, float):
+                    total_stars += int(star_count)
 
             if len(repositories) < 100:
                 break
             page += 1
 
-    return repository_names
+    return total_stars
 
 
 def get_total_commit_contributions(username: str, token: str | None) -> int:
@@ -199,129 +182,92 @@ def get_total_commit_contributions(username: str, token: str | None) -> int:
     return total_commits
 
 
-def list_star_datetimes_for_repository(
-    username: str,
-    repository_name: str,
-    token: str | None,
-) -> list[dt.datetime]:
-    """Return all stargazer timestamps (UTC) for a repository via GraphQL.
+def _parse_sample_timestamp(raw_timestamp: str) -> dt.datetime:
+    """Parse a stored ISO-8601 sample timestamp into an aware UTC datetime."""
+    parsed = dt.datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
 
-    Uses GraphQL because the REST `/stargazers` endpoint returns 403 for
-    GitHub Actions installation tokens (`GITHUB_TOKEN`) on other repositories.
-    """
-    stargazers_query = """
-    query($owner: String!, $name: String!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        stargazers(first: 100, after: $cursor, orderBy: {field: STARRED_AT, direction: ASC}) {
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-          edges {
-            starredAt
-          }
-        }
-      }
+
+def load_star_run_history(history_path: Path) -> list[tuple[dt.datetime, int]]:
+    """Load persisted per-run star samples from disk."""
+    if not history_path.exists():
+        return []
+
+    payload = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Invalid history payload in {history_path}")
+
+    raw_samples = payload.get("samples")
+    if not isinstance(raw_samples, list):
+        raise ValueError(f"Missing samples list in {history_path}")
+
+    samples: list[tuple[dt.datetime, int]] = []
+    for raw_sample in raw_samples:
+        if not isinstance(raw_sample, dict):
+            continue
+        recorded_at = raw_sample.get("recorded_at")
+        total_stars = raw_sample.get("total_stars")
+        if not isinstance(recorded_at, str) or not isinstance(total_stars, int):
+            continue
+        samples.append((_parse_sample_timestamp(recorded_at), total_stars))
+
+    samples.sort(key=lambda sample: sample[0])
+    return samples
+
+
+def save_star_run_history(history_path: Path, samples: list[tuple[dt.datetime, int]]) -> None:
+    """Persist per-run star samples to disk."""
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": HISTORY_SCHEMA_VERSION,
+        "samples": [
+            {
+                "recorded_at": timestamp.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                "total_stars": total_stars,
+            }
+            for timestamp, total_stars in samples
+        ],
     }
-    """
-    star_datetimes: list[dt.datetime] = []
-    cursor: str | None = None
-    with requests.Session() as session:
-        while True:
-            data = _request_graphql(
-                session,
-                stargazers_query,
-                token,
-                {"owner": username, "name": repository_name, "cursor": cursor},
-            )
-            repository_payload = data.get("repository")
-            if not isinstance(repository_payload, dict):
-                raise ValueError(
-                    f"Repository not found or inaccessible: {username}/{repository_name}"
-                )
-            stargazers_payload = repository_payload.get("stargazers")
-            if not isinstance(stargazers_payload, dict):
-                raise ValueError(
-                    f"Missing stargazers payload for {username}/{repository_name}"
-                )
-            edges = stargazers_payload.get("edges")
-            if not isinstance(edges, list):
-                raise ValueError(
-                    f"Invalid stargazer edges for {username}/{repository_name}"
-                )
-
-            for edge in edges:
-                if not isinstance(edge, dict):
-                    continue
-                starred_at = edge.get("starredAt")
-                if isinstance(starred_at, str):
-                    star_datetimes.append(
-                        dt.datetime.fromisoformat(starred_at.replace("Z", "+00:00"))
-                    )
-
-            page_info = stargazers_payload.get("pageInfo")
-            if not isinstance(page_info, dict):
-                break
-            has_next_page = page_info.get("hasNextPage") is True
-            end_cursor = page_info.get("endCursor")
-            if not has_next_page or not isinstance(end_cursor, str) or not end_cursor:
-                break
-            cursor = end_cursor
-
-    return star_datetimes
+    history_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def build_halfday_total_star_series(
-    all_star_datetimes: list[dt.datetime],
-    end_datetime: dt.datetime,
+def append_star_run_sample(
+    samples: list[tuple[dt.datetime, int]],
+    recorded_at: dt.datetime,
+    total_stars: int,
     weeks: int,
-) -> tuple[list[dt.datetime], list[int]]:
-    """Build 12-hour cumulative total-star snapshots for the last N weeks."""
+) -> list[tuple[dt.datetime, int]]:
+    """Append the current run sample and keep only the last N weeks of points."""
     if weeks <= 0:
         raise ValueError("weeks must be positive")
+    if total_stars < 0:
+        raise ValueError("total_stars must be non-negative")
 
-    bucket_size = dt.timedelta(hours=12)
-    epoch = dt.datetime(1970, 1, 1, tzinfo=dt.timezone.utc)
+    recorded_at_utc = recorded_at.astimezone(dt.timezone.utc)
+    updated_samples = list(samples)
+    updated_samples.append((recorded_at_utc, total_stars))
+    updated_samples.sort(key=lambda sample: sample[0])
 
-    def floor_to_bucket(timestamp: dt.datetime) -> dt.datetime:
-        """Floor timestamp to the nearest 12-hour bucket start."""
-        elapsed_seconds = (timestamp - epoch).total_seconds()
-        floored_seconds = int(elapsed_seconds // bucket_size.total_seconds()) * int(bucket_size.total_seconds())
-        return epoch + dt.timedelta(seconds=floored_seconds)
-
-    window_start = end_datetime - dt.timedelta(weeks=weeks)
-    first_bucket_start = floor_to_bucket(window_start)
-    last_bucket_start = floor_to_bucket(end_datetime)
-
-    bucket_starts: list[dt.datetime] = []
-    current_bucket = first_bucket_start
-    while current_bucket <= last_bucket_start:
-        bucket_starts.append(current_bucket)
-        current_bucket += bucket_size
-
-    bucket_new_stars = Counter(
-        floor_to_bucket(star_datetime)
-        for star_datetime in all_star_datetimes
-        if first_bucket_start <= star_datetime <= end_datetime
-    )
-    baseline_total = sum(1 for star_datetime in all_star_datetimes if star_datetime < first_bucket_start)
-
-    cumulative_totals: list[int] = []
-    running_total = baseline_total
-    for bucket_start in bucket_starts:
-        running_total += bucket_new_stars.get(bucket_start, 0)
-        cumulative_totals.append(running_total)
-
-    return bucket_starts, cumulative_totals
+    window_start = recorded_at_utc - dt.timedelta(weeks=weeks)
+    return [sample for sample in updated_samples if sample[0] >= window_start]
 
 
-def render_weekly_star_graph(
-    bucket_starts: list[dt.datetime],
-    cumulative_totals: list[int],
+def render_run_star_graph(
+    samples: list[tuple[dt.datetime, int]],
+    weeks: int,
     output_path: Path,
 ) -> None:
-    """Render total stars graph using 12-hour resolution."""
+    """Render total stars graph using one point per action run."""
+    if weeks <= 0:
+        raise ValueError("weeks must be positive")
+    if not samples:
+        raise ValueError("samples must not be empty")
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamps = [sample[0] for sample in samples]
+    totals = [sample[1] for sample in samples]
 
     plt.style.use("dark_background")
     figure, axis = plt.subplots(figsize=(12, 3.8), dpi=140)
@@ -329,16 +275,19 @@ def render_weekly_star_graph(
     axis.set_facecolor("#0D1117")
 
     axis.plot(
-        bucket_starts,
-        cumulative_totals,
+        timestamps,
+        totals,
         color="#58A6FF",
         linewidth=2.3,
+        marker="o",
+        markersize=4.5,
     )
-    y_floor = min(cumulative_totals) if cumulative_totals else 0
-    axis.fill_between(bucket_starts, cumulative_totals, y_floor, color="#58A6FF", alpha=0.20)
+    y_floor = min(totals)
+    axis.fill_between(timestamps, totals, y_floor, color="#58A6FF", alpha=0.20)
 
+    week_label = "1 Week" if weeks == 1 else f"{weeks} Weeks"
     axis.set_title(
-        "Total Stars Across All Repositories (Last 9 Weeks, 12h Granularity)",
+        f"Total Stars Across All Repositories (Last {week_label}, Per Action Run)",
         color="#C9D1D9",
         fontsize=12,
         pad=10,
@@ -349,18 +298,25 @@ def render_weekly_star_graph(
     axis.tick_params(axis="y", colors="#8B949E")
     axis.grid(True, axis="y", linestyle="--", alpha=0.25, color="#30363D")
 
-    axis.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MO, interval=1))
+    axis.xaxis.set_major_locator(mdates.DayLocator(interval=1))
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+    axis.xaxis.set_minor_locator(mdates.HourLocator(interval=6))
     figure.autofmt_xdate()
     axis.yaxis.set_major_locator(MaxNLocator(integer=True))
-    y_min = min(cumulative_totals) if cumulative_totals else 0
-    y_max = max(cumulative_totals) if cumulative_totals else 0
+    y_min = min(totals)
+    y_max = max(totals)
     axis.set_ylim(max(0, y_min - 1), max(1, y_max) + 1)
+
+    latest_timestamp = timestamps[-1]
+    axis.set_xlim(
+        latest_timestamp - dt.timedelta(weeks=weeks),
+        latest_timestamp + dt.timedelta(hours=3),
+    )
 
     for spine in axis.spines.values():
         spine.set_color("#30363D")
 
-    current_total = cumulative_totals[-1] if cumulative_totals else 0
+    current_total = totals[-1]
     axis.text(
         0.99,
         0.93,
@@ -426,8 +382,13 @@ def parse_arguments() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="Generate total-stars graph SVG.")
     parser.add_argument("--user", required=True, help="GitHub username")
-    parser.add_argument("--weeks", type=int, default=9, help="Window size in weeks")
-    parser.add_argument("--weekly-output", help="Output SVG path for weekly stars graph")
+    parser.add_argument("--weeks", type=int, default=1, help="Window size in weeks")
+    parser.add_argument("--weekly-output", help="Output SVG path for stars graph")
+    parser.add_argument(
+        "--history-output",
+        default="assets/stars-run-history.json",
+        help="Persisted per-run star history JSON path",
+    )
     parser.add_argument("--metrics-output", required=True, help="Output SVG path for metrics card")
     parser.add_argument(
         "--metrics-only",
@@ -443,12 +404,7 @@ def main() -> None:
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     end_datetime = dt.datetime.now(dt.timezone.utc)
 
-    repository_names = list_public_owner_repositories(arguments.user, token)
-    all_star_datetimes: list[dt.datetime] = []
-    for repository_name in repository_names:
-        all_star_datetimes.extend(list_star_datetimes_for_repository(arguments.user, repository_name, token))
-
-    total_stars = len(all_star_datetimes)
+    total_stars = get_total_public_owner_stars(arguments.user, token)
     total_commits = get_total_commit_contributions(arguments.user, token)
     render_totals_card(total_stars, total_commits, Path(arguments.metrics_output))
 
@@ -458,14 +414,18 @@ def main() -> None:
     if not arguments.weekly_output:
         raise ValueError("--weekly-output is required unless --metrics-only is set")
 
-    bucket_starts, cumulative_totals = build_halfday_total_star_series(
-        all_star_datetimes=all_star_datetimes,
-        end_datetime=end_datetime,
+    history_path = Path(arguments.history_output)
+    existing_samples = load_star_run_history(history_path)
+    updated_samples = append_star_run_sample(
+        samples=existing_samples,
+        recorded_at=end_datetime,
+        total_stars=total_stars,
         weeks=arguments.weeks,
     )
-    render_weekly_star_graph(
-        bucket_starts=bucket_starts,
-        cumulative_totals=cumulative_totals,
+    save_star_run_history(history_path, updated_samples)
+    render_run_star_graph(
+        samples=updated_samples,
+        weeks=arguments.weeks,
         output_path=Path(arguments.weekly_output),
     )
 
